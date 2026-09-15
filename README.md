@@ -1,6 +1,6 @@
 # ask - AI CLI tool
 
-A lightweight bash script for querying AI models via the OpenRouter API, optimized for direct, executable output.
+A lightweight bash script for querying AI models via the Infomaniak API, optimized for direct, executable output.
 
 ## Quick start
 
@@ -12,19 +12,50 @@ cd ask
 chmod +x ask
 sudo cp ask /usr/local/bin/
 
-
-# Make sure you have you OpenRouter API key
-export OPENROUTER_API_KEY="your-api-key-here"
+# Ensure you have an opencode config with Infomaniak provider at:
+# ~/.config/opencode/opencode.json
+# Or set OPENCODE_CONFIG to point to your config file.
 
 # Test it
 > ask remove lines in file1 that appear in file2
 
 grep -vFf file2 file1 > file3 && mv file3 file1
 
-[inception/mercury-coder via Inception - 0.66s - 20.9 tok/s]
+[moonshotai/Kimi-K2.6 - 0.66s - 20.9 tok/s]
 ```
 
 We also provide a handy install script.
+
+## Configuration
+
+`ask` reads API credentials from your opencode configuration file. No credentials are stored in this repository.
+
+### Default config location
+
+```bash
+~/.config/opencode/opencode.json
+```
+
+The Infomaniak provider must be configured with `baseURL` and `apiKey`:
+
+```json
+{
+  "provider": {
+    "infomaniak": {
+      "options": {
+        "baseURL": "https://api.infomaniak.com/2/ai/<project-id>/openai/v1",
+        "apiKey": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+### Custom config path
+
+```bash
+export OPENCODE_CONFIG=/path/to/your/opencode.json
+```
 
 ## Usage
 
@@ -37,29 +68,21 @@ ask ffmpeg command to convert mp4 to gif
 ### Model selection
 
 ```bash
-# Default model (Mercury Coder - optimized for code)
+# Default model (Kimi K2.6 - long context)
 ask find files larger than 20mb
 
 # Shorthand flags for quick model switching
-ask -c "prompt"  # Mercury Coder (default, best for code)
-ask -g "prompt"  # Gemini 2.5 Flash (fast, general purpose)
-ask -s "prompt"  # Claude Sonnet 4 (complex reasoning)
-ask -k "prompt"  # Kimi K2 (long context)
-ask -q "prompt"  # Qwen 235B (large model)
+ask -c "prompt"  # NVIDIA Nemotron 3 Nano (fast)
+ask -g "prompt"  # Mistral Small 4 (general purpose)
+ask -s "prompt"  # Apertus 70B (complex reasoning)
+ask -x "prompt"  # Kimi K2.6 (default, long context)
+ask -d "prompt"  # Qwen 3.5 122B (deep reasoning)
+ask -q "prompt"  # Qwen 3.5 122B (qwen)
+ask -o "prompt"  # Apertus 70B (open)
 
 # Custom model by full name
-ask -m "openai/gpt-4o" "Explain this concept"
+ask -m "Qwen/Qwen3-Embedding-8B" "Explain this concept"
 ```
-
-### Provider routing
-
-Specify provider order for fallback support:
-
-```bash
-ask --provider "cerebras,together" "Generate code"
-```
-
-This will try Cerebras first, then fall back to Together if needed.
 
 ### System prompts
 
@@ -90,16 +113,17 @@ cat script.py | ask "Review this code"
 
 | Option | Description |
 |--------|-------------|
-| `-c` | Use Mercury Coder (default) |
-| `-g` | Use Google Gemini 2.5 Flash |
-| `-s` | Use Claude Sonnet 4 |
-| `-k` | Use Moonshotai Kimi K2 |
-| `-q` | Use Qwen3 235B |
+| `-c` | Use NVIDIA Nemotron 3 Nano (fast) |
+| `-g` | Use Mistral Small 4 (general) |
+| `-s` | Use Apertus 70B (strong) |
+| `-x` | Use Kimi K2.6 (default, long context) |
+| `-d` | Use Qwen 3.5 122B (deep) |
+| `-q` | Use Qwen 3.5 122B (qwen) |
+| `-o` | Use Apertus 70B (open) |
 | `-m MODEL` | Use custom model |
 | `-r` | Disable system prompt |
 | `--stream` | Enable streaming output |
 | `--system` | Set custom system prompt |
-| `--provider` | Set provider order (comma-separated) |
 | `-h, --help` | Show help message |
 
 ## Common use cases
@@ -148,13 +172,13 @@ docker ps -a | ask "Which containers are using the most memory?"
 
 ### Dependencies
 - `bash` - Shell interpreter
-- `curl` - HTTP requests to OpenRouter API
-- `jq` - JSON parsing for API responses
+- `curl` - HTTP requests to Infomaniak API
+- `jq` - JSON parsing for API responses and config reading
 - `bc` - Performance metrics calculation
 
 ### API access
-- OpenRouter API key (get one at [openrouter.ai](https://openrouter.ai))
-- Set as environment variable: `OPENROUTER_API_KEY`
+- Infomaniak AI API key (configure in your opencode config)
+- Config location: `~/.config/opencode/opencode.json` (or `OPENCODE_CONFIG`)
 
 ## License
 

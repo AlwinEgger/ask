@@ -1,36 +1,64 @@
 #!/bin/bash
 
-# ask - Simple OpenRouter API CLI tool
+# ask - Simple Infomaniak AI API CLI tool
 # Usage: ask [OPTIONS] [PROMPT]
+# Reads API configuration from ~/.config/opencode/opencode.json
 
 set -euo pipefail
 
-# Check for API key
-if [ -z "${OPENROUTER_API_KEY:-}" ]; then
-    echo "Error: OPENROUTER_API_KEY environment variable is not set" >&2
-    exit 1
-fi
+# Configuration file path (override with OPENCODE_CONFIG env var)
+CONFIG_FILE="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.json}"
+
+# Load Infomaniak configuration from opencode config
+load_infomaniak_config() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "Error: opencode config not found at $CONFIG_FILE" >&2
+        echo "Set OPENCODE_CONFIG to override, or ensure opencode is configured." >&2
+        exit 1
+    fi
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "Error: jq is required but not installed" >&2
+        exit 1
+    fi
+
+    local base_url api_key
+    base_url=$(jq -r '.provider.infomaniak.options.baseURL // empty' "$CONFIG_FILE" 2>/dev/null)
+    api_key=$(jq -r '.provider.infomaniak.options.apiKey // empty' "$CONFIG_FILE" 2>/dev/null)
+
+    if [ -z "$base_url" ] || [ -z "$api_key" ]; then
+        echo "Error: Infomaniak provider not configured in $CONFIG_FILE" >&2
+        echo "Ensure 'provider.infomaniak.options.baseURL' and 'apiKey' are set." >&2
+        exit 1
+    fi
+
+    printf '%s\t%s' "$base_url" "$api_key"
+}
+
+# Read config once
+CONFIG=$(load_infomaniak_config)
+API_BASE_URL=$(printf '%s' "$CONFIG" | cut -f1)
+API_KEY=$(printf '%s' "$CONFIG" | cut -f2-)
 
 # Model shortcuts function
 get_model() {
     case "$1" in
-        c) echo "inception/mercury-coder:nitro" ;;
-        g) echo "google/gemini-3-flash-preview:nitro" ;;
-        s) echo "anthropic/claude-sonnet-4.6:nitro" ;;
-        x) echo "x-ai/grok-4-fast:nitro" ;;
-        d) echo "deepseek/deepseek-v3.2:nitro" ;;
-        q) echo "qwen/qwen3-235b-a22b-07-25:nitro" ;;
-        o) echo "openai/gpt-5.2:nitro" ;;
+        c) echo "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8" ;;
+        g) echo "mistralai/Mistral-Small-4-119B-2603" ;;
+        s) echo "swiss-ai/Apertus-70B-Instruct-2509" ;;
+        x) echo "moonshotai/Kimi-K2.6" ;;
+        d) echo "Qwen/Qwen3.5-122B-A10B-FP8" ;;
+        q) echo "Qwen/Qwen3.5-122B-A10B-FP8" ;;
+        o) echo "swiss-ai/Apertus-70B-Instruct-2509" ;;
     esac
 }
 
 # Default values
-MODEL="anthropic/claude-sonnet-4.6:nitro"
+MODEL="moonshotai/Kimi-K2.6"
 SYSTEM_PROMPT=""
 PROMPT=""
 STREAMING=false
 NO_SYSTEM=false
-PROVIDER_ORDER=""
 
 # Default system prompt (direct answers)
 DEFAULT_PROMPT="You are a direct answer engine. Output ONLY the requested information.
@@ -50,29 +78,32 @@ Rules:
 # Function to show help
 show_help() {
     cat << EOF
-ask - Query AI models via OpenRouter API
+ask - Query AI models via Infomaniak API
 
 Usage: ask [OPTIONS] [PROMPT]
 
 Options:
-  -c          Use inception/mercury-coder
-  -g          Use google/gemini-3-flash-preview
-  -s          Use anthropic/claude-sonnet-4.6 (default)
-  -x          Use x-ai/grok-4-fast
-  -d          Use deepseek/deepseek-v3.2
-  -q          Use qwen/qwen3-235b-a22b-07-25
-  -o          Use openai/gpt-5.2
+  -c          Use nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8 (fast)
+  -g          Use mistralai/Mistral-Small-4-119B-2603 (general)
+  -s          Use swiss-ai/Apertus-70B-Instruct-2509 (strong)
+  -x          Use moonshotai/Kimi-K2.6 (default, long context)
+  -d          Use Qwen/Qwen3.5-122B-A10B-FP8 (deep)
+  -q          Use Qwen/Qwen3.5-122B-A10B-FP8 (qwen)
+  -o          Use swiss-ai/Apertus-70B-Instruct-2509 (open)
   -m MODEL    Use custom model
   -r          Disable system prompt (raw model behavior)
   --stream    Enable streaming output
   --system    Set system prompt for the conversation
-  --provider  Comma-separated list of providers for routing
   -h, --help  Show this help message
+
+Configuration:
+  Reads API credentials from ~/.config/opencode/opencode.json
+  Set OPENCODE_CONFIG to use a different config file.
 
 Examples:
   ask "Write a hello world in Python"
   ask -g "Explain quantum computing"
-  ask -m openai/gpt-4o "What is 2+2?"
+  ask -m Qwen/Qwen3-Embedding-8B "What is 2+2?"
   echo "Fix this code" | ask
   ask --system "You are a pirate" "Tell me about sailing"
 
@@ -98,9 +129,6 @@ while [ $# -gt 0 ]; do
             shift ;;
         --system)
             SYSTEM_PROMPT="${2:?Error: --system requires a prompt}"
-            shift 2 ;;
-        --provider)
-            PROVIDER_ORDER="${2:?Error: --provider requires providers}"
             shift 2 ;;
         *)
             PROMPT="$*"
@@ -133,19 +161,14 @@ fi
 # Record start time
 START_TIME=$(date +%s.%N)
 
-# Build JSON payload once
-PROVIDER_JSON=""
-if [ -n "$PROVIDER_ORDER" ]; then
-    PROVIDER_JSON=',"provider":{"order":['$(echo "$PROVIDER_ORDER" | awk -F, '{for(i=1;i<=NF;i++) printf "\"%s\"%s", $i, (i<NF?",":"")}')']}'
-fi
-
+# Build JSON payload
 JSON_PAYLOAD='{
     "model": "'"$MODEL"'",
     "messages": '"$MESSAGES"',
-    "stream": '$([ "$STREAMING" = true ] && echo true || echo false)"$PROVIDER_JSON"'
+    "stream": '$([ "$STREAMING" = true ] && echo true || echo false)'
 }'
 
-API_URL="https://openrouter.ai/api/v1/chat/completions"
+API_URL="${API_BASE_URL}/chat/completions"
 
 # Add newline before answer
 echo
@@ -155,7 +178,7 @@ if [ "$STREAMING" = true ]; then
     # Streaming mode
     curl -sS "$API_URL" \
       -H "Content-Type: application/json" \
-      -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+      -H "Authorization: Bearer $API_KEY" \
       -d "$JSON_PAYLOAD" 2>&1 | while IFS= read -r line; do
         # Check for errors
         if echo "$line" | grep -q '"error"'; then
@@ -182,7 +205,7 @@ else
     # Non-streaming mode
     response=$(curl -sS "$API_URL" \
       -H "Content-Type: application/json" \
-      -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+      -H "Authorization: Bearer $API_KEY" \
       -d "$JSON_PAYLOAD" 2>&1)
 
     # Check for errors
@@ -197,9 +220,8 @@ else
     # Show metadata
     ELAPSED=$(printf "%.2f" $(echo "$(date +%s.%N) - $START_TIME" | bc))
     TOKENS=$(echo "$response" | jq -r '.usage.completion_tokens // 0')
-    PROVIDER=$(echo "$response" | jq -r '.provider // "Unknown"')
     TPS=$(echo "scale=1; $TOKENS / $ELAPSED" | bc 2>/dev/null || echo "0.0")
 
     echo
-    echo "[$MODEL via $PROVIDER - ${ELAPSED}s - ${TPS} tok/s]" >&2
+    echo "[$MODEL - ${ELAPSED}s - ${TPS} tok/s]" >&2
 fi
